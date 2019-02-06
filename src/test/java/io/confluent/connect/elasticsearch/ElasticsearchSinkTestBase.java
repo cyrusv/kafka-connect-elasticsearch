@@ -19,10 +19,13 @@ import com.google.gson.JsonObject;
 
 import io.confluent.connect.elasticsearch.jest.JestElasticsearchClient;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.config.SslConfigs;
+import org.apache.kafka.common.network.Mode;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.sink.SinkRecord;
+import org.apache.kafka.test.TestSslUtils;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.node.Node;
@@ -30,6 +33,7 @@ import org.elasticsearch.test.ESIntegTestCase;
 import org.junit.After;
 import org.junit.Before;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -51,6 +55,8 @@ public class ElasticsearchSinkTestBase extends ESIntegTestCase {
 
   protected ElasticsearchClient client;
   private DataConverter converter;
+
+  protected File trustStoreFile;
 
   @Before
   public void setUp() throws Exception {
@@ -132,12 +138,33 @@ public class ElasticsearchSinkTestBase extends ESIntegTestCase {
   /* For ES 2.x */
   @Override
   protected Settings nodeSettings(int nodeOrdinal) {
-    return Settings.settingsBuilder()
-        .put(super.nodeSettings(nodeOrdinal))
-        .put(IndexMetaData.SETTING_NUMBER_OF_SHARDS, 1)
-        .put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS, 1)
-        .put(Node.HTTP_ENABLED, true)
-        .build();
+    try {
+      if (trustStoreFile == null) {
+        trustStoreFile = File.createTempFile("truststore", ".jks");
+      }
+      Map<String, Object> sslConfigs = TestSslUtils.createSslConfig(
+          true, true, Mode.CLIENT, trustStoreFile, "certalias");
+      return Settings.settingsBuilder()
+          .put(super.nodeSettings(nodeOrdinal))
+          .put(IndexMetaData.SETTING_NUMBER_OF_SHARDS, 1)
+          .put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS, 1)
+          .put(Node.HTTP_ENABLED, true)
+          .put("xpack.ssl.client_authentication", "none")
+          .put("xpack.security.transport.ssl.enabled", "true")
+          .put("xpack.security.transport.ssl.keystore.path", sslConfigs.get(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG))
+          .put("xpack.security.transport.ssl.keystore.password", sslConfigs.get(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG))
+          .put("xpack.security.transport.ssl.truststore.path", sslConfigs.get(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG))
+          .put("xpack.security.transport.ssl.truststore.password", sslConfigs.get(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG))
+          .put("xpack.security.http.ssl.enabled", "true")
+          .put("xpack.security.http.ssl.keystore.path", sslConfigs.get(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG))
+          .put("xpack.security.http.ssl.keystore.password", sslConfigs.get(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG))
+          .put("xpack.security.http.ssl.truststore.path", sslConfigs.get(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG))
+          .put("xpack.security.http.ssl.truststore.password", sslConfigs.get(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG))
+          .build();
+    }
+      catch (Exception e) {
+        return null;
+      }
   }
 
   /* For ES 5.x (requires Java 8) */
